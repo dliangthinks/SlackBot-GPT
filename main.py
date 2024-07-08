@@ -1,38 +1,24 @@
-
 import os
 from openai import OpenAI
-from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 from slack_bolt import App
+from slack_bolt.adapter.flask import SlackRequestHandler
+from flask import Flask, request
 
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
-# what is signing secret for?
-# SIGNING_SECRET = os.environ["SIGNING_SECRET"]
-SLACK_APP_TOKEN = os.environ["SLACK_APP_TOKEN"]
-
+SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
 # Event API & Web API
-app = App(token=SLACK_BOT_TOKEN) 
+app = App(token=SLACK_BOT_TOKEN, signing_secret=SLACK_SIGNING_SECRET)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 slack_client = WebClient(SLACK_BOT_TOKEN)
 
-# This happens when I direct message the bot
-
-# This gets activated when the bot is tagged in a channel    
+flask_app = Flask(__name__)
+handler = SlackRequestHandler(app)
 @app.event("app_mention")
 def handle_message_events(body, logger):
-    # Log message
-    #print(str(body["event"]["text"]).split(">")[1])
-    
-    # Create prompt for ChatGPT
     prompt = str(body["event"]["text"]).split(">")[1]
     
-    # # Let the user know that we are busy with the request 
-    # response = slack_client.chat_postMessage(channel=body["event"]["channel"], 
-    #                                    thread_ts=body["event"]["event_ts"],
-    #                                    text=f"Hello from your bot! :robot_face: \nThanks for your request, I'm on it!")
-    
-    # Check ChatGPT
     chat_completion = openai_client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
@@ -42,10 +28,13 @@ def handle_message_events(body, logger):
     )
     response_text = chat_completion.choices[0].message.content
 
-    # Reply to thread 
     response = slack_client.chat_postMessage(channel=body["event"]["channel"], 
                                        thread_ts=body["event"]["event_ts"],
                                        text=response_text)
 
+@flask_app.route("/slack/events", methods=["POST"])
+def slack_events():
+    return handler.handle(request)
+
 if __name__ == "__main__":
-    SocketModeHandler(app, SLACK_APP_TOKEN).start()
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 3000)))
